@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+
+__copyright__ = 'Copyright (C) Volker Diels-Grabsch <v@njh.eu>'
+
+import configparser
+import datetime
+import email.message
+import os
+import smtplib
+import stat
+import subprocess
+import sys
+import urllib.request
+
+def get_ok_response_format():
+    return 'OK: %Y-%m-%dT%H:%M:%SZ\n'
+
+def get_max_read():
+    return 64 * 1024
+
+def get_permissions(filepath):
+    return stat.S_IMODE(os.stat(filepath).st_mode)
+
+def read_config(configfile):
+    if get_permissions(configfile) not in [0o0400, 0o0600]:
+        raise RuntimeError('Configuration file has insecure permissions')
+    main_section = 'main'
+    cp = configparser.RawConfigParser()
+    cp.read(configfile)
+    return {
+        'main': {
+            'host': cp.get(main_section, 'host'),
+            'user': cp.get(main_section, 'user'),
+            'pass': cp.get(main_section, 'pass'),
+            'from': cp.get(main_section, 'from'),
+            'statusfile': cp.get(main_section, 'statusfile'),
+        },
+        'sites': [
+            {
+                'name': section,
+                'url': cp.get(section, 'url'),
+                'to_list': [to.strip() for to in cp.get(section, 'to').split(',')],
+            }
+            for section in cp.sections()
+            if section != main_section
+        ],
+    }
+
+def sendmail(config, to_list, subject, content):
+    message = email.message.EmailMessage()
+    message['From'] = config['main']['from']
+    message['To'] = ', '.join(to_list)
+    message['Subject'] = subject
+    message.set_content(content)
+    with smtplib.SMTP_SSL(config['main']['host']) as smtp:
+        smtp.login(config['main']['user'], config['main']['pass'])
+        smtp.send_message(message)
+
+def get_safe_url(url):
+    parts = urllib.parse.urlparse(url)
+    userinfo, host_port = urllib.parse.splituser(parts.netloc)
+    if userinfo is None:
+        return url
+    new_netloc = '***:***@{host_port}'.format(**locals())
+    new_parts = parts._replace(netloc=new_netloc)
+    return urllib.parse.urlunparse(new_parts)
+
+def urlopen_with_basic_auth(url, timeout_seconds):
+    parts = urllib.parse.urlparse(url)
+    userinfo, host_port = urllib.parse.splituser(parts.netloc)
+    if userinfo is None:
+        return urllib.request.urlopen(url, timeout=timeout_seconds)
+    url_without_userinfo = urllib.parse.urlunparse(parts._replace(netloc=host_port))
+    user, pass_ = urllib.parse.splitpasswd(userinfo)
+    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, url_without_userinfo, user, pass_)
+    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
+    opener = urllib.request.build_opener(auth_handler)
+    return opener.open(url_without_userinfo, timeout=timeout_seconds)
+
+def read_url_http_https(url):
+    timeout_seconds = 5
+    with urlopen_with_basic_auth(url, timeout_seconds) as response:
+        data = response.read(get_max_read())
+        data_one_more = response.read(1)
+        truncated = (len(data_one_more) != 0)
+        return data, truncated
+
+def read_url_shell_command(url):
+    prefix = 'sh:'
+    assert url.startswith(prefix)
+    shell_command = url[len(prefix):].strip()
+    data_all = subprocess.check_output(['/bin/sh', '-c', '--', shell_command], stderr=subprocess.STDOUT)
+    data = data_all[:get_max_read()]
+    truncated = len(data) != len(data_all)
+    return data, truncated
+
+def read_url(url):
+    if url.startswith('http://') or url.startswith('https://'):
+        return read_url_http_https(url)
+    if url.startswith('sh:'):
+        return read_url_shell_command(url)
+    raise ValueError('Invalid URL: {url!r}'.format(**locals()))
+
+def format_server_error(data, truncated):
+    try:
+        server_error = data.decode('utf-8')
+        text_or_binary = 'text'
+    except Exception as e:
+        server_error = repr(data)
+        text_or_binary = 'binary'
+    data_len = len(data)
+    truncated_str = ', truncated to {data_len} bytes'.format(**locals()) if truncated else ''
+    ellipsis = '...\n' if truncated else ''
+    if server_error[-1:] == '\n':
+        add_newline = ''
+    else:
+        add_newline = '\n'
+    return 'Error ({text_or_binary}{truncated_str}):\n\n{server_error}{add_newline}{ellipsis}'.format(**locals())
+
+def check_url(url):
+    max_past = datetime.timedelta(minutes=5)
+    max_future = datetime.timedelta(minutes=1)
+    try:
+        data, truncated = read_url(url)
+    except Exception as e:
+        return 'Error while loading status:\n\n{e!r}\n'.format(**locals())
+    if truncated:
+        return format_server_error(data, truncated)
+    try:
+        data_str = data.decode('ascii')
+        last_update = datetime.datetime.strptime(data_str, get_ok_response_format())
+    except Exception as e:
+        return format_server_error(data, truncated)
+    diff = datetime.datetime.utcnow() - last_update
+    diff_seconds = diff.total_seconds()
+    if diff > max_past:
+        return 'No status update for {diff_seconds:.0f} seconds:\n\n{data_str}'.format(**locals())
+    future_diff = -diff
+    future_diff_seconds = future_diff.total_seconds()
+    if future_diff > max_future:
+        return 'Last status update is {future_diff_seconds:.0f} seconds in the future:\n\n{data_str}'.format(**locals())
+    return None
+
+def check_site(config, site):
+    name = site['name']
+    url = site['url']
+    to_list = site['to_list']
+    error_details = check_url(url)
+    if error_details is None:
+        return
+    subject = 'Failure of: {name}'.format(**locals())
+    safe_url = get_safe_url(url)
+    content = 'Failure of: {name}\n\nStatus URL: {safe_url}\n\n{error_details}'.format(**locals())
+    sendmail(config, to_list=to_list, subject=subject, content=content)
+
+def write_file(filepath, content_bytes):
+    with open(filepath, mode='wb') as f:
+        f.write(content_bytes)
+
+def write_statusfile(config):
+    status_bytes = datetime.datetime.utcnow().strftime(get_ok_response_format()).encode('ascii')
+    write_file(config['main']['statusfile'], status_bytes)
+
+def run(configfile):
+    config = read_config(configfile)
+    for site in config['sites']:
+        check_site(config, site)
+    write_statusfile(config)
+
+def usage():
+    sys.stdout.write('Usage: statusmonitor CONFIGFILE\n')
+    sys.exit(1)
+
+def main():
+    if len(sys.argv) != 2:
+        usage()
+    run(configfile=sys.argv[1])
+
+if __name__ == '__main__':
+    main()
