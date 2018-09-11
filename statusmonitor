@@ -116,7 +116,7 @@ def format_server_error(data, truncated):
         add_newline = ''
     else:
         add_newline = '\n'
-    return 'Error ({text_or_binary}{truncated_str}):\n\n{server_error}{add_newline}{ellipsis}'.format(**locals())
+    return 'Error ({text_or_binary}{truncated_str}): {server_error}{add_newline}{ellipsis}'.format(**locals())
 
 def check_url(url):
     max_past = datetime.timedelta(minutes=5)
@@ -124,7 +124,7 @@ def check_url(url):
     try:
         data, truncated = read_url(url)
     except Exception as e:
-        return 'Error while loading status:\n\n{e!r}\n'.format(**locals())
+        return 'Error while loading status: {e!r}\n'.format(**locals())
     if truncated:
         return format_server_error(data, truncated)
     try:
@@ -135,12 +135,21 @@ def check_url(url):
     diff = datetime.datetime.utcnow() - last_update
     diff_seconds = diff.total_seconds()
     if diff > max_past:
-        return 'No status update for {diff_seconds:.0f} seconds:\n\n{data_str}'.format(**locals())
+        return 'No status update for {diff_seconds:.0f} seconds: {data_str}'.format(**locals())
     future_diff = -diff
     future_diff_seconds = future_diff.total_seconds()
     if future_diff > max_future:
-        return 'Last status update is {future_diff_seconds:.0f} seconds in the future:\n\n{data_str}'.format(**locals())
+        return 'Last status update is {future_diff_seconds:.0f} seconds in the future: {data_str}'.format(**locals())
     return None
+
+def shorten_with_ellipsis(s, max_len):
+    assert isinstance(s, str)
+    ellipsis = '...'
+    ellipsis_len = len(ellipsis)
+    assert max_len >= ellipsis_len
+    if len(s) <= max_len:
+        return s
+    return s[:max_len-ellipsis_len] + ellipsis
 
 def check_site(config, site):
     name = site['name']
@@ -149,9 +158,11 @@ def check_site(config, site):
     error_details = check_url(url)
     if error_details is None:
         return
-    subject = 'Failure of: {name}'.format(**locals())
+    first_line = error_details.split('\n', 1)[0]
+    error_details_subject = shorten_with_ellipsis(first_line, 64)
+    subject = 'Failure of {name}: {error_details_subject}\n'.format(**locals())
     safe_url = get_safe_url(url)
-    content = 'Failure of: {name}\n\nStatus URL: {safe_url}\n\n{error_details}'.format(**locals())
+    content = 'Failure of {name}\nStatus URL: {safe_url}\n{error_details}'.format(**locals())
     sendmail(config, to_list=to_list, subject=subject, content=content)
 
 def write_file(filepath, content_bytes):
