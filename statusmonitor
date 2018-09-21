@@ -159,7 +159,7 @@ def check_site(config, site):
     if error_details is None:
         return
     first_line = error_details.split('\n', 1)[0]
-    error_details_subject = shorten_with_ellipsis(first_line, 64)
+    error_details_subject = shorten_with_ellipsis(first_line, 80)
     subject = 'Failure of {name}: {error_details_subject}\n'.format(**locals())
     safe_url = get_safe_url(url)
     content = 'Failure of {name}\nStatus URL: {safe_url}\n{error_details}'.format(**locals())
