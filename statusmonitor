@@ -105,18 +105,18 @@ def read_url(url):
 def format_server_error(data, truncated):
     try:
         server_error = data.decode('utf-8')
-        text_or_binary = 'text'
+        binary_indicator = ''
     except Exception as e:
         server_error = repr(data)
-        text_or_binary = 'binary'
+        binary_indicator = ' binary'
     data_len = len(data)
-    truncated_str = ', truncated to {data_len} bytes'.format(**locals()) if truncated else ''
+    truncated_indicator = ', truncated to {data_len} bytes'.format(**locals()) if truncated else ''
     ellipsis = '...\n' if truncated else ''
     if server_error[-1:] == '\n':
         add_newline = ''
     else:
         add_newline = '\n'
-    return 'Error ({text_or_binary}{truncated_str}): {server_error}{add_newline}{ellipsis}'.format(**locals())
+    return 'Error{binary_indicator}{truncated_indicator}: {server_error}{add_newline}{ellipsis}'.format(**locals())
 
 def check_url(url):
     max_past = datetime.timedelta(minutes=5)
