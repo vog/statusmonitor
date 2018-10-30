@@ -15,6 +15,12 @@ import urllib.request
 def get_ok_response_format():
     return 'OK: %Y-%m-%dT%H:%M:%SZ\n'
 
+def get_max_past():
+    return datetime.timedelta(minutes=5)
+
+def get_max_future():
+    return datetime.timedelta(minutes=1)
+
 def get_max_read():
     return 64 * 1024
 
@@ -119,8 +125,6 @@ def format_server_error(data, truncated):
     return 'Error{binary_indicator}{truncated_indicator}: {server_error}{add_newline}{ellipsis}'.format(**locals())
 
 def check_url(url):
-    max_past = datetime.timedelta(minutes=5)
-    max_future = datetime.timedelta(minutes=1)
     try:
         data, truncated = read_url(url)
     except Exception as e:
@@ -134,11 +138,11 @@ def check_url(url):
         return format_server_error(data, truncated)
     diff = datetime.datetime.utcnow() - last_update
     diff_seconds = diff.total_seconds()
-    if diff > max_past:
+    if diff > get_max_past():
         return 'No status update for {diff_seconds:.0f} seconds: {data_str}'.format(**locals())
     future_diff = -diff
     future_diff_seconds = future_diff.total_seconds()
-    if future_diff > max_future:
+    if future_diff > get_max_future():
         return 'Last status update is {future_diff_seconds:.0f} seconds in the future: {data_str}'.format(**locals())
     return None
 
