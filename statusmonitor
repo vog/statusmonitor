@@ -45,7 +45,7 @@ def read_config(configfile):
             {
                 'name': section,
                 'url': cp.get(section, 'url'),
-                'timeout_seconds': cp.getint(section, 'timeout_seconds', fallback=5),
+                'timeout_seconds': cp.getint(section, 'timeout_seconds', fallback=60),
                 'to_list': [to.strip() for to in cp.get(section, 'to').split(',')],
             }
             for section in cp.sections()
