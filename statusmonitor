@@ -62,24 +62,31 @@ def sendmail(config, to_list, subject, content):
         smtp.login(config['main']['user'], config['main']['pass'])
         smtp.send_message(message)
 
+def get_host_port(url_parts):
+    if url_parts.port is None:
+        return url_parts.hostname
+    else:
+        return '{url_parts.hostname}:{url_parts.port}'.format(**locals())
+
+def has_auth_info(url_parts):
+    return (url_parts.username is not None) or (url_parts.password is not None)
+
 def get_safe_url(url):
-    parts = urllib.parse.urlparse(url)
-    userinfo, host_port = urllib.parse.splituser(parts.netloc)
-    if userinfo is None:
+    url_parts = urllib.parse.urlparse(url)
+    if not has_auth_info(url_parts):
         return url
+    host_port = get_host_port(url_parts)
     new_netloc = '***:***@{host_port}'.format(**locals())
-    new_parts = parts._replace(netloc=new_netloc)
-    return urllib.parse.urlunparse(new_parts)
+    return urllib.parse.urlunparse(url_parts._replace(netloc=new_netloc))
 
 def urlopen_with_basic_auth(url, timeout_seconds):
-    parts = urllib.parse.urlparse(url)
-    userinfo, host_port = urllib.parse.splituser(parts.netloc)
-    if userinfo is None:
+    url_parts = urllib.parse.urlparse(url)
+    if not has_auth_info(url_parts):
         return urllib.request.urlopen(url, timeout=timeout_seconds)
-    url_without_userinfo = urllib.parse.urlunparse(parts._replace(netloc=host_port))
-    user, pass_ = urllib.parse.splitpasswd(userinfo)
+    host_port = get_host_port(url_parts)
+    url_without_userinfo = urllib.parse.urlunparse(url_parts._replace(netloc=host_port))
     password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-    password_manager.add_password(None, url_without_userinfo, user, pass_)
+    password_manager.add_password(None, url_without_userinfo, url_parts.username, url_parts.password)
     auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
     opener = urllib.request.build_opener(auth_handler)
     return opener.open(url_without_userinfo, timeout=timeout_seconds)
