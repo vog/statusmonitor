@@ -16,10 +16,12 @@ to = receiver1@example.com
 
 [Service 2 with HTTP auth]
 url = https://status-user:status-password@service2.example.com/status
+timeout_seconds = 120
 to = receiver2@example.com, receiver3@example.com
 
 [Service 2 statusmonitor]
 url = https://service2.example.com/statusmonitor/status
+timeout_seconds = 1
 to = receiver2@example.com
 
 [Service 3 custom script]

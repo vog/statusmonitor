@@ -45,6 +45,7 @@ def read_config(configfile):
             {
                 'name': section,
                 'url': cp.get(section, 'url'),
+                'timeout_seconds': cp.getint(section, 'timeout_seconds', fallback=5),
                 'to_list': [to.strip() for to in cp.get(section, 'to').split(',')],
             }
             for section in cp.sections()
@@ -91,8 +92,7 @@ def urlopen_with_basic_auth(url, timeout_seconds):
     opener = urllib.request.build_opener(auth_handler)
     return opener.open(url_without_userinfo, timeout=timeout_seconds)
 
-def read_url_http_https(url):
-    timeout_seconds = 5
+def read_url_http_https(url, timeout_seconds):
     with urlopen_with_basic_auth(url, timeout_seconds) as response:
         data = response.read(get_max_read())
         data_one_more = response.read(1)
@@ -108,9 +108,9 @@ def read_url_shell_command(url):
     truncated = len(data) != len(data_all)
     return data, truncated
 
-def read_url(url):
+def read_url(url, timeout_seconds):
     if url.startswith('http://') or url.startswith('https://'):
-        return read_url_http_https(url)
+        return read_url_http_https(url, timeout_seconds)
     if url.startswith('sh:'):
         return read_url_shell_command(url)
     raise ValueError('Invalid URL: {url!r}'.format(**locals()))
@@ -131,9 +131,9 @@ def format_server_error(data, truncated):
         add_newline = '\n'
     return 'Error{binary_indicator}{truncated_indicator}: {server_error}{add_newline}{ellipsis}'.format(**locals())
 
-def check_url(url):
+def check_url(url, timeout_seconds):
     try:
-        data, truncated = read_url(url)
+        data, truncated = read_url(url, timeout_seconds)
     except Exception as e:
         return 'Error while loading status: {e!r}\n'.format(**locals())
     if truncated:
@@ -165,8 +165,9 @@ def shorten_with_ellipsis(s, max_len):
 def check_site(config, site):
     name = site['name']
     url = site['url']
+    timeout_seconds = site['timeout_seconds']
     to_list = site['to_list']
-    error_details = check_url(url)
+    error_details = check_url(url, timeout_seconds)
     if error_details is None:
         return
     first_line = error_details.split('\n', 1)[0]
